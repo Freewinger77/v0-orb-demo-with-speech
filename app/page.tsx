@@ -26,12 +26,14 @@ export default function VapiOrbDemo() {
   const [assistantVolume, setAssistantVolume] = useState(0)
   const [micRingState, setMicRingState] = useState<"idle" | "loading" | "shrinking" | "hidden">("idle")
   const [isAssistantTurn, setIsAssistantTurn] = useState(false)
+  const [isTransitioning, setIsTransitioning] = useState(false) // Add state to track transition when ending call
   const vapiRef = useRef<any>(null)
   const assistantConfigRef = useRef<any>(null)
   const userMessagesEndRef = useRef<HTMLDivElement>(null)
   const assistantMessagesEndRef = useRef<HTMLDivElement>(null)
   const typingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const previousMessageLengthRef = useRef(0)
+  const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Add ref to track transition timeout
 
   const userMessages = messages.filter((m) => m.role === "user")
   const assistantMessages = messages.filter((m) => m.role === "assistant")
@@ -91,39 +93,16 @@ export default function VapiOrbDemo() {
 
   const initializeVapi = () => {
     if (typeof window !== "undefined" && (window as any).vapiSDK && !vapiRef.current) {
-      const assistant = {
-        name: "Voice Assistant",
-        voice: {
-          voiceId: "sarah",
-          provider: "11labs",
-        },
-        model: {
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a helpful voice assistant. Keep your responses concise and conversational. You can help users with questions and have natural conversations.",
-            },
-          ],
-          provider: "openai",
-        },
-        firstMessage: "Hello! I'm your voice assistant. How can I help you today?",
-        transcriber: {
-          model: "nova-2",
-          language: "en",
-          provider: "deepgram",
-        },
-      }
+      const assistantId = "6758242e-c1bf-4325-8e19-fd05374129e8" // Use assistant ID instead of inline configuration
 
-      assistantConfigRef.current = assistant
+      assistantConfigRef.current = assistantId
 
-      const apiKey = process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY || "YOUR_VAPI_PUBLIC_KEY"
+      const apiKey = "850a5646-5c57-4175-90a7-182f9706076d" // Updated VAPI public key
 
       try {
         vapiRef.current = (window as any).vapiSDK.run({
           apiKey: apiKey,
-          assistant: assistant,
+          assistant: assistantId,
           config: {
             position: "bottom-right",
             offset: "40px",
@@ -149,6 +128,11 @@ export default function VapiOrbDemo() {
         })
 
         vapiRef.current.on("call-start", () => {
+          if (transitionTimeoutRef.current) {
+            clearTimeout(transitionTimeoutRef.current)
+            transitionTimeoutRef.current = null
+          }
+          setIsTransitioning(false)
           setIsConnected(true)
           setStatus("Listening")
           setAgentState("listening")
@@ -159,10 +143,12 @@ export default function VapiOrbDemo() {
         })
 
         vapiRef.current.on("call-end", () => {
+          setIsTransitioning(true)
           setIsConnected(false)
-          setStatus("Inactive")
-          setAgentState(null)
+          setStatus("Ending call...")
+          setAgentState("thinking")
           setAssistantVolume(0)
+
           if (currentUserTranscript) {
             setMessages((prev) => [...prev, { role: "user", content: currentUserTranscript, timestamp: Date.now() }])
             setCurrentUserTranscript("")
@@ -174,7 +160,13 @@ export default function VapiOrbDemo() {
             ])
             setCurrentAssistantMessage("")
           }
-          setMicRingState("idle")
+
+          transitionTimeoutRef.current = setTimeout(() => {
+            setAgentState(null)
+            setStatus("Inactive")
+            setIsTransitioning(false)
+            setMicRingState("idle")
+          }, 800)
         })
 
         vapiRef.current.on("speech-start", () => {
@@ -298,6 +290,14 @@ export default function VapiOrbDemo() {
       vapiRef.current.stop()
     }
   }
+
+  useEffect(() => {
+    return () => {
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current)
+      }
+    }
+  }, [])
 
   return (
     <>
